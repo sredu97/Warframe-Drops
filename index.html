@@ -598,8 +598,10 @@ function sectionsFromJSON(d){
     const locs = [];
     for(const [planet,nodes] of Object.entries(d.missionRewards||{})){
       for(const [node,info] of Object.entries(nodes||{})){
+        const modo = info.gameMode || '—';
+        const yaLoLleva = new RegExp('\\(\\s*'+modo.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*\\)\\s*$','i').test(node);
         locs.push({
-          name:(info.isEvent?'Event: ':'')+planet+'/'+node+' ('+(info.gameMode||'—')+')',
+          name:(info.isEvent?'Event: ':'')+planet+'/'+node+(yaLoLleva?'':' ('+modo+')'),
           groups:groupsFromRewards(info.rewards)
         });
       }
@@ -919,10 +921,42 @@ const SORT_LABELS = {
   'orig'    :'Orden original (por rareza)'
 };
 function sortSelectHTML(){
-  return `<label class="sortwrap">Ordenar: <select id="sortSel">`+
+  return `<label class="sortwrap">Drops: <select id="sortSel">`+
     Object.entries(SORT_LABELS).map(([v,t])=>`<option value="${v}"${v===SORT?' selected':''}>${t}</option>`).join('')+
     `</select></label>`;
 }
+let LOC_SORT = 'orig';
+const LOC_SORT_LABELS = {
+  'orig'     :'Orden original',
+  'pct-desc' :'Mejor probabilidad',
+  'pct-asc'  :'Peor probabilidad',
+  'count'    :'Más drops',
+  'name'     :'Nombre (A-Z)'
+};
+function locMax(loc){
+  if(loc._max === undefined){
+    let m = 0, n = 0;
+    for(const g of loc.groups){ n += g.drops.length; for(const d of g.drops) if(d.pct > m) m = d.pct; }
+    loc._max = m; loc._n = n;
+  }
+  return loc._max;
+}
+function locSortSelectHTML(){
+  return `<label class="sortwrap">Bloques: <select id="locSortSel">`+
+    Object.entries(LOC_SORT_LABELS).map(([v,t])=>`<option value="${v}"${v===LOC_SORT?' selected':''}>${t}</option>`).join('')+
+    `</select></label>`;
+}
+function sortLocs(locs){
+  if(LOC_SORT==='orig') return locs;
+  const a = locs.slice();
+  a.forEach(locMax);
+  if(LOC_SORT==='pct-desc') a.sort((x,y)=> y._max-x._max || trPlace(x.name).localeCompare(trPlace(y.name),'es'));
+  else if(LOC_SORT==='pct-asc') a.sort((x,y)=> x._max-y._max || trPlace(x.name).localeCompare(trPlace(y.name),'es'));
+  else if(LOC_SORT==='count') a.sort((x,y)=> y._n-x._n || trPlace(x.name).localeCompare(trPlace(y.name),'es'));
+  else a.sort((x,y)=> trPlace(x.name).localeCompare(trPlace(y.name),'es'));
+  return a;
+}
+
 function sortRows(rows){
   if(SORT==='orig') return rows;
   const a = rows.slice();
@@ -949,13 +983,15 @@ function renderSection(filter){
   const sec = SECTIONS[currentSection];
   const f = filter.trim().toLowerCase();
   const locs = f ? sec.locations.filter(l=> l.name.toLowerCase().includes(f) || trPlace(l.name).toLowerCase().includes(f)) : sec.locations;
-  const shown = locs.slice(0, renderLimit);
+  const ordenados = sortLocs(locs);
+  const shown = ordenados.slice(0, renderLimit);
 
   let html = `<div class="section-head"><h2 title="${esc(sec.title)}">${esc(trSection(sec.title))}</h2><span class="count">${locs.length} lugares</span></div>
   <div class="toolbar">
     <input id="locFilter" type="text" placeholder="Filtrar lugares…" value="${esc(filter)}">
     <button class="wf mini" id="expandAll">Expandir visibles</button>
     <button class="wf mini" id="collapseAll">Contraer todo</button>
+    ${locSortSelectHTML()}
     ${sortSelectHTML()}
   </div>`;
 
@@ -969,8 +1005,8 @@ function renderSection(filter){
       <span class="items">${total} drops</span>
     </button><div class="loc-body"></div></div>`;
   }
-  if(locs.length > renderLimit){
-    html += `<div id="showMoreWrap"><button class="wf" id="showMore">Mostrar ${Math.min(200, locs.length-renderLimit)} más (${locs.length-renderLimit} restantes)</button></div>`;
+  if(ordenados.length > renderLimit){
+    html += `<div id="showMoreWrap"><button class="wf" id="showMore">Mostrar ${Math.min(200, ordenados.length-renderLimit)} más (${ordenados.length-renderLimit} restantes)</button></div>`;
   }
   const view = $('#view');
   view.innerHTML = html;
@@ -984,14 +1020,19 @@ function renderSection(filter){
   $('#collapseAll').addEventListener('click', ()=>cards.forEach(c=>{ c.classList.remove('open'); }));
   const sm = $('#showMore');
   if(sm) sm.addEventListener('click', ()=>{ renderLimit += 200; renderSection(filter); });
-  onSortChange(()=>{
-    const abiertas = new Set(cards.map((c,i)=>c.classList.contains('open')?i:-1).filter(i=>i>=0));
+  const reordenar = (reabrir) => {
+    const abiertas = reabrir
+      ? new Set(cards.map((c,i)=>c.classList.contains('open')?i:-1).filter(i=>i>=0))
+      : new Set();
     renderSection(filter);
     if(abiertas.size){
       const nuevas = [...$('#view').querySelectorAll('.loc')];
       abiertas.forEach(i=>{ if(nuevas[i]) toggleLoc(nuevas[i], shown[i]); });
     }
-  });
+  };
+  onSortChange(()=>reordenar(true));
+  const lsel = $('#locSortSel');
+  if(lsel) lsel.addEventListener('change', e=>{ LOC_SORT = e.target.value; renderLimit = 120; reordenar(false); });
 
   if(shown.length===1) toggleLoc(cards[0], shown[0]);
 }
