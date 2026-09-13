@@ -152,7 +152,12 @@ main#content{flex:1;overflow-y:auto;padding:18px 22px 60px;min-width:0}
   display:grid;grid-template-columns:auto auto;gap:12px 26px;align-items:start;
   box-shadow:0 10px 26px rgba(0,0,0,.5);text-align:left;
 }
-.fpanel .fgrp:nth-child(3){grid-column:1 / -1}
+.fpanel .fancho{grid-column:1 / -1}
+.fpanel .sortwrap{margin-left:0;display:block;color:var(--muted)}
+.fpanel .sortwrap select{
+  margin-top:2px;width:100%;background:var(--panel2);border:1px solid var(--line);
+  color:var(--text);padding:6px 8px;font-family:inherit;font-size:12.5px;
+}
 .fpanel[hidden]{display:none}
 .fgrp h5{
   font-family:'Chakra Petch';font-size:11px;letter-spacing:.06em;color:var(--cyan);
@@ -996,7 +1001,7 @@ function filtrosHTML(){
   const chk = (grupo,val,txt,marcado) =>
     `<label class="fchk"><input type="checkbox" data-g="${grupo}" value="${val}"${marcado?' checked':''}> ${txt}</label>`;
   return `<div class="filterbox">
-    <button class="wf mini" id="filtBtn" aria-expanded="${PANEL_ABIERTO}">Filtros${n?' ('+n+')':''}</button>
+    <button class="wf mini" id="filtBtn" aria-expanded="${PANEL_ABIERTO}">Filtros y orden${n?' ('+n+')':''}</button>
     <div class="fpanel"${PANEL_ABIERTO?'':' hidden'}>
       <div class="fgrp"><h5>Rareza</h5>
         ${RAREZAS.map(([v,t])=>chk('rar',v.toLowerCase(),t,FILTROS.rar.has(v.toLowerCase()))).join('')}
@@ -1004,13 +1009,16 @@ function filtrosHTML(){
       <div class="fgrp"><h5>Tipo de objeto</h5>
         ${TIPOS.map(([v,t])=>chk('tipo',v,t,FILTROS.tipo.has(v))).join('')}
       </div>
-      <div class="fgrp"><h5>Probabilidad (%)</h5>
+      <div class="fgrp fancho"><h5>Probabilidad (%)</h5>
         <div class="frange">
           <label>Mín <input type="number" id="fMin" min="0" max="100" step="0.5" value="${FILTROS.min}"></label>
           <label>Máx <input type="number" id="fMax" min="0" max="100" step="0.5" value="${FILTROS.max}"></label>
         </div>
       </div>
-      <button class="wf mini" id="filtClear">Limpiar filtros</button>
+      <div class="fgrp fancho"><h5>Ordenar</h5>
+        ${sortSelectHTML()}
+      </div>
+      <button class="wf mini" id="filtClear">Restablecer</button>
     </div>
   </div>`;
 }
@@ -1042,12 +1050,13 @@ function bindFiltros(rerender){
   const cl = $('#filtClear');
   if(cl) cl.addEventListener('click', ()=>{
     FILTROS.rar.clear(); FILTROS.tipo.clear(); FILTROS.min = 0; FILTROS.max = 100;
+    SORT = 'pct-desc';
     rerender();
   });
 }
 
 function sortSelectHTML(){
-  return `<label class="sortwrap">Ordenar: <select id="sortSel">`+
+  return `<label class="sortwrap"><select id="sortSel">`+
     Object.entries(SORT_LABELS).map(([v,t])=>`<option value="${v}"${v===SORT?' selected':''}>${t}</option>`).join('')+
     `</select></label>`;
 }
@@ -1126,7 +1135,6 @@ function renderSection(filter){
     <button class="wf mini" id="expandAll">Expandir visibles</button>
     <button class="wf mini" id="collapseAll">Contraer todo</button>
     ${filtrosHTML()}
-    ${sortSelectHTML()}
   </div>`;
 
   if(!shown.length) html += `<div class="empty">Sin resultados para ese filtro.</div>`;
@@ -1344,7 +1352,6 @@ function renderSearch(q){
     <div class="toolbar">
       <input id="srcFilter" type="text" placeholder="Filtrar lugares…" value="${esc(SRC_FILTER)}">
       ${filtrosHTML()}
-      ${sortSelectHTML()}
     </div>`;
 
   if(!items.length && filtrosActivos()){
