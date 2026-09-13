@@ -926,6 +926,7 @@ function sortSelectHTML(){
     `</select></label>`;
 }
 let LOC_SORT = 'orig';
+let ROW_SORT = 'pct-desc';   // orden de las fuentes dentro de un objeto buscado
 let SRC_FILTER = '';   // filtro de lugares dentro de la vista de búsqueda
 const LOC_SORT_LABELS = {
   'orig'     :'Orden original',
@@ -942,9 +943,10 @@ function locMax(loc){
   }
   return loc._max;
 }
-function locSortSelectHTML(){
+function locSortSelectHTML(actual, conConteo){
+  const opts = Object.entries(LOC_SORT_LABELS).filter(([v])=> conConteo || v!=='count');
   return `<label class="sortwrap">Bloques: <select id="locSortSel">`+
-    Object.entries(LOC_SORT_LABELS).map(([v,t])=>`<option value="${v}"${v===LOC_SORT?' selected':''}>${t}</option>`).join('')+
+    opts.map(([v,t])=>`<option value="${v}"${v===actual?' selected':''}>${t}</option>`).join('')+
     `</select></label>`;
 }
 function sortLocs(locs){
@@ -959,8 +961,8 @@ function sortLocs(locs){
 }
 
 function sortRows(rows){
-  // En la búsqueda cada fila ES un bloque, así que manda el selector de bloques
-  const modo = LOC_SORT === 'count' ? 'name' : LOC_SORT;
+  // En la búsqueda cada fila ES un bloque, con su propio criterio de orden
+  const modo = ROW_SORT === 'count' ? 'name' : ROW_SORT;
   if(modo==='orig') return rows;
   const a = rows.slice();
   const nom = r => trPlace(r.loc);
@@ -1000,7 +1002,7 @@ function renderSection(filter){
     <input id="locFilter" type="text" placeholder="Filtrar lugares…" value="${esc(filter)}">
     <button class="wf mini" id="expandAll">Expandir visibles</button>
     <button class="wf mini" id="collapseAll">Contraer todo</button>
-    ${locSortSelectHTML()}
+    ${locSortSelectHTML(LOC_SORT, true)}
     ${sortSelectHTML()}
   </div>`;
 
@@ -1215,7 +1217,7 @@ function renderSearch(q){
     <span class="count">${totalObjetos} objetos · ${totalFilas} apariciones${SRC_FILTER?' (filtrado de '+hits.length+')':''}</span></div>
     <div class="toolbar">
       <input id="srcFilter" type="text" placeholder="Filtrar lugares…" value="${esc(SRC_FILTER)}">
-      ${locSortSelectHTML()}
+      ${locSortSelectHTML(ROW_SORT, false)}
       ${sortSelectHTML()}
     </div>`;
 
@@ -1263,7 +1265,7 @@ function renderSearch(q){
   });
   onSortChange(()=>renderSearch(q));
   const ls = $('#locSortSel');
-  if(ls) ls.addEventListener('change', e=>{ LOC_SORT = e.target.value; renderSearch(q); });
+  if(ls) ls.addEventListener('change', e=>{ ROW_SORT = e.target.value; renderSearch(q); });
   const sf = $('#srcFilter');
   if(sf) sf.addEventListener('input', e=>{
     SRC_FILTER = e.target.value.trim().toLowerCase();
