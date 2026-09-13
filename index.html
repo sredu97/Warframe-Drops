@@ -143,6 +143,10 @@ main#content{flex:1;overflow-y:auto;padding:18px 22px 60px;min-width:0}
 }
 .toolbar input{width:230px}
 .toolbar .mini{font-size:12px;padding:6px 12px}
+.sortwrap{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-left:auto}
+.sortwrap select{font-size:12px}
+.result-rows .showRest{margin:8px 0 2px}
+.rrow .val,.drop .val{font-variant-numeric:tabular-nums}
 
 /* ---------- Tarjetas de localización ---------- */
 .loc{border:1px solid var(--line);background:var(--panel);margin-bottom:10px}
@@ -906,6 +910,41 @@ function selectSection(i){
   $('#content').scrollTop = 0;
 }
 
+/* ===== Orden de los drops ===== */
+let SORT = 'pct-desc';
+const SORT_LABELS = {
+  'pct-desc':'Probabilidad: mayor a menor',
+  'pct-asc' :'Probabilidad: menor a mayor',
+  'name'    :'Nombre (A-Z)',
+  'orig'    :'Orden original (por rareza)'
+};
+function sortSelectHTML(){
+  return `<label class="sortwrap">Ordenar: <select id="sortSel">`+
+    Object.entries(SORT_LABELS).map(([v,t])=>`<option value="${v}"${v===SORT?' selected':''}>${t}</option>`).join('')+
+    `</select></label>`;
+}
+function sortRows(rows){
+  if(SORT==='orig') return rows;
+  const a = rows.slice();
+  const nom = r => trPlace(r.loc);
+  if(SORT==='pct-desc') a.sort((x,y)=> y.pct-x.pct || nom(x).localeCompare(nom(y),'es'));
+  else if(SORT==='pct-asc') a.sort((x,y)=> x.pct-y.pct || nom(x).localeCompare(nom(y),'es'));
+  else a.sort((x,y)=> nom(x).localeCompare(nom(y),'es'));
+  return a;
+}
+function sortDrops(arr){
+  if(SORT==='orig') return arr;
+  const a = arr.slice();
+  if(SORT==='pct-desc') a.sort((x,y)=> y.pct-x.pct || x.item.localeCompare(y.item));
+  else if(SORT==='pct-asc') a.sort((x,y)=> x.pct-y.pct || x.item.localeCompare(y.item));
+  else a.sort((x,y)=> x.item.localeCompare(y.item,'es'));
+  return a;
+}
+function onSortChange(after){
+  const sel = $('#sortSel');
+  if(sel) sel.addEventListener('change', e=>{ SORT = e.target.value; after(); });
+}
+
 function renderSection(filter){
   const sec = SECTIONS[currentSection];
   const f = filter.trim().toLowerCase();
@@ -917,6 +956,7 @@ function renderSection(filter){
     <input id="locFilter" type="text" placeholder="Filtrar lugares…" value="${esc(filter)}">
     <button class="wf mini" id="expandAll">Expandir visibles</button>
     <button class="wf mini" id="collapseAll">Contraer todo</button>
+    ${sortSelectHTML()}
   </div>`;
 
   if(!shown.length) html += `<div class="empty">Sin resultados para ese filtro.</div>`;
@@ -944,6 +984,14 @@ function renderSection(filter){
   $('#collapseAll').addEventListener('click', ()=>cards.forEach(c=>{ c.classList.remove('open'); }));
   const sm = $('#showMore');
   if(sm) sm.addEventListener('click', ()=>{ renderLimit += 200; renderSection(filter); });
+  onSortChange(()=>{
+    const abiertas = new Set(cards.map((c,i)=>c.classList.contains('open')?i:-1).filter(i=>i>=0));
+    renderSection(filter);
+    if(abiertas.size){
+      const nuevas = [...$('#view').querySelectorAll('.loc')];
+      abiertas.forEach(i=>{ if(nuevas[i]) toggleLoc(nuevas[i], shown[i]); });
+    }
+  });
 
   if(shown.length===1) toggleLoc(cards[0], shown[0]);
 }
@@ -954,7 +1002,7 @@ function toggleLoc(card, loc){
   if(!body.dataset.filled){
     let h='';
     for(const g of loc.groups){
-      h += `<div class="subgroup">${g.label?`<h4>${esc(traduceGrupo(g.label))}</h4>`:''}${g.drops.map(dropRowHTML).join('')}</div>`;
+      h += `<div class="subgroup">${g.label?`<h4>${esc(traduceGrupo(g.label))}</h4>`:''}${sortDrops(g.drops).map(dropRowHTML).join('')}</div>`;
     }
     body.innerHTML = h; body.dataset.filled='1';
   }
@@ -1098,7 +1146,6 @@ $('#clearSearch').addEventListener('click', ()=>{
 function renderSearch(q){
   const ql = q.toLowerCase();
   const hits = SEARCH_INDEX.filter(r=>r.k.includes(ql) || (r.e && r.e.includes(ql)));
-  // agrupar por objeto
   const byItem = new Map();
   for(const h of hits){
     if(!byItem.has(h.item)) byItem.set(h.item, []);
@@ -1109,37 +1156,50 @@ function renderSearch(q){
     .slice(0, 40);
 
   let html = `<div class="section-head"><h2>Búsqueda: “${esc(q)}”</h2>
-    <span class="count">${byItem.size} objetos · ${hits.length} apariciones</span></div>`;
+    <span class="count">${byItem.size} objetos · ${hits.length} apariciones</span></div>
+    <div class="toolbar">${sortSelectHTML()}</div>`;
 
   if(!items.length){
     html += `<div class="empty">Ningún objeto coincide con «${esc(q)}».<br>Prueba con el nombre en inglés, tal y como aparece en el juego.</div>`;
   }
 
+  const CORTE = 25;
   for(const [item, rows] of items){
-    rows.sort((a,b)=>b.pct-a.pct);
-    const top = rows.slice(0,12);
+    const ord = sortRows(rows);
     const isSrc = rows[0].src;
     const esT = isSrc ? '' : esName(item);
     const showEsT = esT && esT.toLowerCase() !== item.toLowerCase();
+    const fila = r => {
+      const rc = rarClass(r.rarity);
+      const w = Math.max(1.5, Math.min(100, r.pct));
+      return `<div class="rrow">
+        <div class="where"><b>${esc(trPlace(r.loc))}</b>${r.group?` <span>· ${esc(traduceGrupo(r.group))}</span>`:''} <span>· ${esc(trSection(r.section))}</span></div>
+        <div class="badge ${rc}">${esc(rarName(r.rarity))}</div>
+        <div class="pct ${rc}"><span class="bar"><i style="width:${w}%"></i></span><span class="val">${r.pct.toFixed(2)}%</span></div>
+      </div>`;
+    };
+    const visibles = ord.slice(0, CORTE), resto = ord.slice(CORTE);
     html += `<div class="result-item">
       <h3>${iconHTML(item,28,isSrc)} <span class="tit">${esc(item)}${showEsT?`<span class="es">${esc(esT)}</span>`:''}</span> <small>${rows.length} fuentes</small></h3>
       <div class="result-rows">
-        ${top.map(r=>{
-          const rc = rarClass(r.rarity);
-          const w = Math.max(1.5, Math.min(100, r.pct));
-          return `<div class="rrow">
-            <div class="where"><b>${esc(trPlace(r.loc))}</b>${r.group?` <span>· ${esc(traduceGrupo(r.group))}</span>`:''} <span>· ${esc(trSection(r.section))}</span></div>
-            <div class="badge ${rc}">${esc(rarName(r.rarity))}</div>
-            <div class="pct ${rc}"><span class="bar"><i style="width:${w}%"></i></span><span class="val">${r.pct.toFixed(2)}%</span></div>
-          </div>`;
-        }).join('')}
-        ${rows.length>12?`<div class="more-note">…y ${rows.length-12} fuentes más con menor probabilidad.</div>`:''}
+        ${visibles.map(fila).join('')}
+        ${resto.length?`<div class="rest" hidden>${resto.map(fila).join('')}</div>
+        <button class="wf mini showRest" type="button">Ver las ${resto.length} fuentes restantes</button>`:''}
       </div>
     </div>`;
   }
   if(byItem.size>40) html += `<div class="more-note" style="padding:0 4px 20px">Mostrando 40 de ${byItem.size} objetos. Afina la búsqueda para ver el resto.</div>`;
 
   $('#view').innerHTML = html;
+  $('#view').querySelectorAll('.showRest').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const caja = b.previousElementSibling;
+      const abierto = !caja.hidden;
+      caja.hidden = abierto;
+      b.textContent = abierto ? `Ver las ${caja.children.length} fuentes restantes` : 'Ocultar las fuentes adicionales';
+    });
+  });
+  onSortChange(()=>renderSearch(q));
   $('#content').scrollTop = 0;
 }
 
