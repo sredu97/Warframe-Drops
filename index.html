@@ -549,7 +549,7 @@ function buildIndex(){
       for(const g of loc.groups){
         for(const d of g.drops){
           SEARCH_INDEX.push({
-            k:d.item.toLowerCase(), e:d.src?'':esName(d.item).toLowerCase(), item:d.item,
+            k:norm(d.item), e:d.src?'':norm(esName(d.item)), item:d.item,
             src:!!d.src, section:sec.title, loc:loc.name, group:g.label, rarity:d.rarity, pct:d.pct
           });
         }
@@ -819,7 +819,7 @@ async function resolveUnknowns(){
   };
   await Promise.all([worker(), worker(), worker()]);
   if(resolvedNew){
-    for(const r of SEARCH_INDEX){ if(!r.e){ const e2 = esName(r.item); if(e2) r.e = e2.toLowerCase(); } }
+    for(const r of SEARCH_INDEX){ if(!r.e && !r.src){ const e2 = esName(r.item); if(e2) r.e = norm(e2); } }
     patchDom();
     $('#dictInfo').textContent = '+'+resolvedNew+' objetos nuevos resueltos en vivo';
   }
@@ -912,29 +912,51 @@ function selectSection(i){
   $('#content').scrollTop = 0;
 }
 
-/* ===== Orden de los drops ===== */
+/* ===== Orden unificado (bloques y drops) ===== */
 let SORT = 'pct-desc';
 const SORT_LABELS = {
   'pct-desc':'Probabilidad: mayor a menor',
   'pct-asc' :'Probabilidad: menor a mayor',
+  'qty-desc':'Cantidad: mayor a menor',
+  'qty-asc' :'Cantidad: menor a mayor',
   'name'    :'Nombre (A-Z)',
-  'orig'    :'Orden original (por rareza)'
+  'orig'    :'Orden original'
 };
+let SRC_FILTER = '';   // filtro de lugares dentro de la vista de búsqueda
+
+/* Texto normalizado: minúsculas y sin acentos, para buscar y filtrar */
+function norm(t){
+  return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+/* Cantidad que lleva el nombre del objeto: "1500 Endo"→1500, "200X Titanium"→200, "2,000 Credits"→2000 */
+function qtyOf(name){
+  const m = String(name||'').match(/^([\d][\d.,]*)\s*[xX]?\s+/);
+  if(!m) return 0;
+  const n = parseInt(m[1].replace(/[.,]/g,''), 10);
+  return isFinite(n) ? n : 0;
+}
+/* Para el orden ascendente, lo que no lleva cantidad va al final, no al principio */
+function qtyAsc(name){ const q = qtyOf(name); return q > 0 ? q : Infinity; }
 function sortSelectHTML(){
-  return `<label class="sortwrap">Drops: <select id="sortSel">`+
+  return `<label class="sortwrap">Ordenar: <select id="sortSel">`+
     Object.entries(SORT_LABELS).map(([v,t])=>`<option value="${v}"${v===SORT?' selected':''}>${t}</option>`).join('')+
     `</select></label>`;
 }
-let LOC_SORT = 'orig';
-let ROW_SORT = 'pct-desc';   // orden de las fuentes dentro de un objeto buscado
-let SRC_FILTER = '';   // filtro de lugares dentro de la vista de búsqueda
-const LOC_SORT_LABELS = {
-  'orig'     :'Orden original',
-  'pct-desc' :'Mejor probabilidad',
-  'pct-asc'  :'Peor probabilidad',
-  'count'    :'Más drops',
-  'name'     :'Nombre (A-Z)'
-};
+const cmpNombre = (a,b) => String(a).localeCompare(String(b),'es');
+
+/* Objetos dentro de un bloque */
+function sortDrops(arr){
+  if(SORT==='orig') return arr;
+  const a = arr.slice();
+  if(SORT==='pct-desc')      a.sort((x,y)=> y.pct-x.pct || cmpNombre(x.item,y.item));
+  else if(SORT==='pct-asc')  a.sort((x,y)=> x.pct-y.pct || cmpNombre(x.item,y.item));
+  else if(SORT==='qty-desc') a.sort((x,y)=> qtyOf(y.item)-qtyOf(x.item) || y.pct-x.pct || cmpNombre(x.item,y.item));
+  else if(SORT==='qty-asc')  a.sort((x,y)=> qtyAsc(x.item)-qtyAsc(y.item) || y.pct-x.pct || cmpNombre(x.item,y.item));
+  else a.sort((x,y)=> cmpNombre(x.item,y.item));
+  return a;
+}
+
+/* Bloques (lugares): "cantidad" = cuántos drops tiene la tabla */
 function locMax(loc){
   if(loc._max === undefined){
     let m = 0, n = 0;
@@ -943,47 +965,34 @@ function locMax(loc){
   }
   return loc._max;
 }
-function locSortSelectHTML(actual, conConteo){
-  const opts = Object.entries(LOC_SORT_LABELS).filter(([v])=> conConteo || v!=='count');
-  return `<label class="sortwrap">Bloques: <select id="locSortSel">`+
-    opts.map(([v,t])=>`<option value="${v}"${v===actual?' selected':''}>${t}</option>`).join('')+
-    `</select></label>`;
-}
 function sortLocs(locs){
-  if(LOC_SORT==='orig') return locs;
+  if(SORT==='orig') return locs;
   const a = locs.slice();
   a.forEach(locMax);
-  if(LOC_SORT==='pct-desc') a.sort((x,y)=> y._max-x._max || trPlace(x.name).localeCompare(trPlace(y.name),'es'));
-  else if(LOC_SORT==='pct-asc') a.sort((x,y)=> x._max-y._max || trPlace(x.name).localeCompare(trPlace(y.name),'es'));
-  else if(LOC_SORT==='count') a.sort((x,y)=> y._n-x._n || trPlace(x.name).localeCompare(trPlace(y.name),'es'));
-  else a.sort((x,y)=> trPlace(x.name).localeCompare(trPlace(y.name),'es'));
+  const nom = l => trPlace(l.name);
+  if(SORT==='pct-desc')      a.sort((x,y)=> y._max-x._max || cmpNombre(nom(x),nom(y)));
+  else if(SORT==='pct-asc')  a.sort((x,y)=> x._max-y._max || cmpNombre(nom(x),nom(y)));
+  else if(SORT==='qty-desc') a.sort((x,y)=> y._n-x._n || cmpNombre(nom(x),nom(y)));
+  else if(SORT==='qty-asc')  a.sort((x,y)=> x._n-y._n || cmpNombre(nom(x),nom(y)));
+  else a.sort((x,y)=> cmpNombre(nom(x),nom(y)));
   return a;
 }
 
+/* Fuentes de un objeto buscado: cada fila es un lugar, la cantidad no varía */
 function sortRows(rows){
-  // En la búsqueda cada fila ES un bloque, con su propio criterio de orden
-  const modo = ROW_SORT === 'count' ? 'name' : ROW_SORT;
-  if(modo==='orig') return rows;
+  if(SORT==='orig') return rows;
   const a = rows.slice();
   const nom = r => trPlace(r.loc);
-  if(modo==='pct-desc') a.sort((x,y)=> y.pct-x.pct || nom(x).localeCompare(nom(y),'es'));
-  else if(modo==='pct-asc') a.sort((x,y)=> x.pct-y.pct || nom(x).localeCompare(nom(y),'es'));
-  else a.sort((x,y)=> nom(x).localeCompare(nom(y),'es'));
+  if(SORT==='pct-desc' || SORT==='qty-desc') a.sort((x,y)=> y.pct-x.pct || cmpNombre(nom(x),nom(y)));
+  else if(SORT==='pct-asc' || SORT==='qty-asc') a.sort((x,y)=> x.pct-y.pct || cmpNombre(nom(x),nom(y)));
+  else a.sort((x,y)=> cmpNombre(nom(x),nom(y)));
   return a;
 }
 function coincideBloque(r){
   if(!SRC_FILTER) return true;
   const f = SRC_FILTER;
-  return r.loc.toLowerCase().includes(f) || trPlace(r.loc).toLowerCase().includes(f)
-      || r.section.toLowerCase().includes(f) || trSection(r.section).toLowerCase().includes(f);
-}
-function sortDrops(arr){
-  if(SORT==='orig') return arr;
-  const a = arr.slice();
-  if(SORT==='pct-desc') a.sort((x,y)=> y.pct-x.pct || x.item.localeCompare(y.item));
-  else if(SORT==='pct-asc') a.sort((x,y)=> x.pct-y.pct || x.item.localeCompare(y.item));
-  else a.sort((x,y)=> x.item.localeCompare(y.item,'es'));
-  return a;
+  return norm(r.loc).includes(f) || norm(trPlace(r.loc)).includes(f)
+      || norm(r.section).includes(f) || norm(trSection(r.section)).includes(f);
 }
 function onSortChange(after){
   const sel = $('#sortSel');
@@ -992,8 +1001,8 @@ function onSortChange(after){
 
 function renderSection(filter){
   const sec = SECTIONS[currentSection];
-  const f = filter.trim().toLowerCase();
-  const locs = f ? sec.locations.filter(l=> l.name.toLowerCase().includes(f) || trPlace(l.name).toLowerCase().includes(f)) : sec.locations;
+  const f = norm(filter.trim());
+  const locs = f ? sec.locations.filter(l=> norm(l.name).includes(f) || norm(trPlace(l.name)).includes(f)) : sec.locations;
   const ordenados = sortLocs(locs);
   const shown = ordenados.slice(0, renderLimit);
 
@@ -1002,7 +1011,6 @@ function renderSection(filter){
     <input id="locFilter" type="text" placeholder="Filtrar lugares…" value="${esc(filter)}">
     <button class="wf mini" id="expandAll">Expandir visibles</button>
     <button class="wf mini" id="collapseAll">Contraer todo</button>
-    ${locSortSelectHTML(LOC_SORT, true)}
     ${sortSelectHTML()}
   </div>`;
 
@@ -1041,9 +1049,7 @@ function renderSection(filter){
       abiertas.forEach(i=>{ if(nuevas[i]) toggleLoc(nuevas[i], shown[i]); });
     }
   };
-  onSortChange(()=>reordenar(true));
-  const lsel = $('#locSortSel');
-  if(lsel) lsel.addEventListener('change', e=>{ LOC_SORT = e.target.value; renderLimit = 120; reordenar(false); });
+  onSortChange(()=>{ renderLimit = 120; reordenar(true); });
 
   if(shown.length===1) toggleLoc(cards[0], shown[0]);
 }
@@ -1196,7 +1202,7 @@ $('#clearSearch').addEventListener('click', ()=>{
 });
 
 function renderSearch(q){
-  const ql = q.toLowerCase();
+  const ql = norm(q);
   const hits = SEARCH_INDEX.filter(r=>r.k.includes(ql) || (r.e && r.e.includes(ql)));
   const byItem = new Map();
   for(const h of hits){
@@ -1206,9 +1212,11 @@ function renderSearch(q){
   }
   const mejor = rows => rows.reduce((m,r)=> r.pct>m?r.pct:m, 0);
   let items = [...byItem.entries()];
-  if(SORT==='pct-desc') items.sort((a,b)=> mejor(b[1])-mejor(a[1]) || a[0].localeCompare(b[0],'es'));
-  else if(SORT==='pct-asc') items.sort((a,b)=> mejor(a[1])-mejor(b[1]) || a[0].localeCompare(b[0],'es'));
-  else if(SORT==='name') items.sort((a,b)=> a[0].localeCompare(b[0],'es'));
+  if(SORT==='pct-desc') items.sort((a,b)=> mejor(b[1])-mejor(a[1]) || cmpNombre(a[0],b[0]));
+  else if(SORT==='pct-asc') items.sort((a,b)=> mejor(a[1])-mejor(b[1]) || cmpNombre(a[0],b[0]));
+  else if(SORT==='qty-desc') items.sort((a,b)=> qtyOf(b[0])-qtyOf(a[0]) || mejor(b[1])-mejor(a[1]) || cmpNombre(a[0],b[0]));
+  else if(SORT==='qty-asc') items.sort((a,b)=> qtyAsc(a[0])-qtyAsc(b[0]) || mejor(b[1])-mejor(a[1]) || cmpNombre(a[0],b[0]));
+  else if(SORT==='name') items.sort((a,b)=> cmpNombre(a[0],b[0]));
   else items.sort((a,b)=> a[0].length-b[0].length || a[0].localeCompare(b[0]));
   const totalObjetos = items.length, totalFilas = [...byItem.values()].reduce((n,r)=>n+r.length,0);
   items = items.slice(0, 40);
@@ -1217,7 +1225,6 @@ function renderSearch(q){
     <span class="count">${totalObjetos} objetos · ${totalFilas} apariciones${SRC_FILTER?' (filtrado de '+hits.length+')':''}</span></div>
     <div class="toolbar">
       <input id="srcFilter" type="text" placeholder="Filtrar lugares…" value="${esc(SRC_FILTER)}">
-      ${locSortSelectHTML(ROW_SORT, false)}
       ${sortSelectHTML()}
     </div>`;
 
@@ -1264,11 +1271,9 @@ function renderSearch(q){
     });
   });
   onSortChange(()=>renderSearch(q));
-  const ls = $('#locSortSel');
-  if(ls) ls.addEventListener('change', e=>{ ROW_SORT = e.target.value; renderSearch(q); });
   const sf = $('#srcFilter');
   if(sf) sf.addEventListener('input', e=>{
-    SRC_FILTER = e.target.value.trim().toLowerCase();
+    SRC_FILTER = norm(e.target.value.trim());
     renderSearch(q);
     const n = $('#srcFilter');
     if(n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
