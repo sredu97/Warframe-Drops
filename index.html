@@ -926,6 +926,7 @@ function sortSelectHTML(){
     `</select></label>`;
 }
 let LOC_SORT = 'orig';
+let SRC_FILTER = '';   // filtro de lugares dentro de la vista de búsqueda
 const LOC_SORT_LABELS = {
   'orig'     :'Orden original',
   'pct-desc' :'Mejor probabilidad',
@@ -958,13 +959,21 @@ function sortLocs(locs){
 }
 
 function sortRows(rows){
-  if(SORT==='orig') return rows;
+  // En la búsqueda cada fila ES un bloque, así que manda el selector de bloques
+  const modo = LOC_SORT === 'count' ? 'name' : LOC_SORT;
+  if(modo==='orig') return rows;
   const a = rows.slice();
   const nom = r => trPlace(r.loc);
-  if(SORT==='pct-desc') a.sort((x,y)=> y.pct-x.pct || nom(x).localeCompare(nom(y),'es'));
-  else if(SORT==='pct-asc') a.sort((x,y)=> x.pct-y.pct || nom(x).localeCompare(nom(y),'es'));
+  if(modo==='pct-desc') a.sort((x,y)=> y.pct-x.pct || nom(x).localeCompare(nom(y),'es'));
+  else if(modo==='pct-asc') a.sort((x,y)=> x.pct-y.pct || nom(x).localeCompare(nom(y),'es'));
   else a.sort((x,y)=> nom(x).localeCompare(nom(y),'es'));
   return a;
+}
+function coincideBloque(r){
+  if(!SRC_FILTER) return true;
+  const f = SRC_FILTER;
+  return r.loc.toLowerCase().includes(f) || trPlace(r.loc).toLowerCase().includes(f)
+      || r.section.toLowerCase().includes(f) || trSection(r.section).toLowerCase().includes(f);
 }
 function sortDrops(arr){
   if(SORT==='orig') return arr;
@@ -1177,11 +1186,11 @@ $('#search').addEventListener('input', e=>{
   clearTimeout(searchTimer);
   searchTimer = setTimeout(()=>{
     if(v.trim().length>=2) renderSearch(v.trim());
-    else renderSection($('#locFilter')?$('#locFilter').value:'');
+    else { SRC_FILTER=''; renderSection(''); }
   }, 180);
 });
 $('#clearSearch').addEventListener('click', ()=>{
-  $('#search').value=''; $('#clearSearch').classList.remove('show'); renderSection('');
+  $('#search').value=''; $('#clearSearch').classList.remove('show'); SRC_FILTER=''; renderSection('');
 });
 
 function renderSearch(q){
@@ -1189,19 +1198,31 @@ function renderSearch(q){
   const hits = SEARCH_INDEX.filter(r=>r.k.includes(ql) || (r.e && r.e.includes(ql)));
   const byItem = new Map();
   for(const h of hits){
+    if(!coincideBloque(h)) continue;
     if(!byItem.has(h.item)) byItem.set(h.item, []);
     byItem.get(h.item).push(h);
   }
-  const items = [...byItem.entries()]
-    .sort((a,b)=> a[0].length-b[0].length || a[0].localeCompare(b[0]))
-    .slice(0, 40);
+  const mejor = rows => rows.reduce((m,r)=> r.pct>m?r.pct:m, 0);
+  let items = [...byItem.entries()];
+  if(SORT==='pct-desc') items.sort((a,b)=> mejor(b[1])-mejor(a[1]) || a[0].localeCompare(b[0],'es'));
+  else if(SORT==='pct-asc') items.sort((a,b)=> mejor(a[1])-mejor(b[1]) || a[0].localeCompare(b[0],'es'));
+  else if(SORT==='name') items.sort((a,b)=> a[0].localeCompare(b[0],'es'));
+  else items.sort((a,b)=> a[0].length-b[0].length || a[0].localeCompare(b[0]));
+  const totalObjetos = items.length, totalFilas = [...byItem.values()].reduce((n,r)=>n+r.length,0);
+  items = items.slice(0, 40);
 
   let html = `<div class="section-head"><h2>Búsqueda: “${esc(q)}”</h2>
-    <span class="count">${byItem.size} objetos · ${hits.length} apariciones</span></div>
-    <div class="toolbar">${sortSelectHTML()}</div>`;
+    <span class="count">${totalObjetos} objetos · ${totalFilas} apariciones${SRC_FILTER?' (filtrado de '+hits.length+')':''}</span></div>
+    <div class="toolbar">
+      <input id="srcFilter" type="text" placeholder="Filtrar lugares…" value="${esc(SRC_FILTER)}">
+      ${locSortSelectHTML()}
+      ${sortSelectHTML()}
+    </div>`;
 
   if(!items.length){
-    html += `<div class="empty">Ningún objeto coincide con «${esc(q)}».<br>Prueba con el nombre en inglés, tal y como aparece en el juego.</div>`;
+    html += SRC_FILTER
+      ? `<div class="empty">«${esc(q)}» no aparece en ningún lugar que contenga «${esc(SRC_FILTER)}».<br>Prueba a vaciar el filtro de lugares.</div>`
+      : `<div class="empty">Ningún objeto coincide con «${esc(q)}».<br>Prueba con el nombre en inglés, tal y como aparece en el juego.</div>`;
   }
 
   const CORTE = 25;
@@ -1241,7 +1262,16 @@ function renderSearch(q){
     });
   });
   onSortChange(()=>renderSearch(q));
-  $('#content').scrollTop = 0;
+  const ls = $('#locSortSel');
+  if(ls) ls.addEventListener('change', e=>{ LOC_SORT = e.target.value; renderSearch(q); });
+  const sf = $('#srcFilter');
+  if(sf) sf.addEventListener('input', e=>{
+    SRC_FILTER = e.target.value.trim().toLowerCase();
+    renderSearch(q);
+    const n = $('#srcFilter');
+    if(n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+  });
+  if(!sf || document.activeElement !== sf) $('#content').scrollTop = 0;
 }
 
 /* ================= Logo personalizado =================
